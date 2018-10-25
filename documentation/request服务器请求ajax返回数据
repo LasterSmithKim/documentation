@@ -1,0 +1,156 @@
+使用jquery中的ajax方法请求服务器返回数据
+
+1.部署nginx服务器
+    vi /etc/nginx/conf.d/default.conf
+    //部署服务器根目录，及其文件
+    server {
+    listen       80;
+    server_name  192.168.1.111;
+
+    #charset koi8-r;
+    #access_log  /var/log/nginx/host.access.log  main;
+
+    location / {
+        root   /usr/share/nginx/html/request/request;
+        index  index.html;
+    }
+2.部署服务器文件
+    在根目录下存放json文件
+    http://192.168.1.111/json/cd.json
+
+    在根目录下配置js文件夹
+    js/jquery-3.3.1.min.js
+
+    在根目录下配置index文件
+    index.html
+
+    <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <link rel="shortcut icon" href="#" />
+    <script src="js/jquery-3.3.1.min.js" type="text/javascript" charset="utf-8"></script>
+</head>
+<body>
+    <button id="btn">按钮</button>
+    <div id="box">
+    </div>
+    <script type="text/javascript">
+        $("#btn").bind("click",function() {
+            // http://192.168.1.111/json/cd.json
+
+            //发起网络ajax请求
+            $.ajax({
+                type:'get',//请求类型 post 将把data的数据单独打包加密发送给服务器
+                url:'http://192.168.1.111/json/cd.json',
+                //data:{a:1,b:2},//给服务器发送数据，暂时未使用
+                dataType:'json',//返回的数据类型
+                success:function(data,textStatus){ //成功后执行的函数 textStatus请求成功的状态
+                    //console.log(data)
+                    var d = data['CATALOG']['CD']
+                    console.log(d)
+
+                    for (var i = 0; i < d.length; i++){
+                        var info = d[i];
+                        var $p = $('<p>' + info['name'] + '</p>');
+                        $('#box').append($p);
+                    }
+                }
+            });
+        })
+    </script>
+</body>
+</html>
+
+
+
+
+    cd.json
+
+{
+  "CATALOG": {
+    "CD": [
+      {
+        "id": "001",
+        "name": "昂昂溪"
+      },
+      {
+        "id": "002",
+        "name": "安北"
+      },
+      {
+        "id": "003",
+        "name": "敖包"
+      },
+      {
+        "id": "004",
+        "name": "敖包沟"
+      },
+      {
+        "id": "005",
+        "name": "艾不盖"
+      },
+      {
+        "id": "006",
+        "name": "阿巴嘎旗"
+      },
+      {
+        "id": "007",
+        "name": "艾比湖"
+      },
+      {
+        "id": "008",
+        "name": "安边镇"
+      },
+      {
+        "id": "009",
+        "name": "阿城"
+      },
+      {
+        "id": "010",
+        "name": "㘷岱"
+      },
+      {
+        "id": "011",
+        "name": "安达"
+      },
+      {
+        "id": "012",
+        "name": "安定"
+      },
+      {
+        "id": "013",
+        "name": "安多"
+      },
+      {
+        "id": "014",
+        "name": "安德"
+      },
+      {
+        "id": "015",
+        "name": "阿都呼都格"
+      },
+      {
+        "id": "016",
+        "name": "阿达日嘎"
+      },
+      {
+        "id": "017",
+        "name": "阿尔山"
+      },
+      {
+        "id": "018",
+        "name": "阿尔山北"
+      },
+      {
+        "id": "019",
+        "name": "阿尔乡"
+      },
+      {
+        "id": "020",
+        "name": "安福"
+      }
+    ]
+  }
+}
