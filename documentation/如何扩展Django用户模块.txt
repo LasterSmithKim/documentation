@@ -1,0 +1,395 @@
+如何扩展Django用户模块
+
+2016/11/15 · 工具与框架 · 1 评论 · Django
+本文由 伯乐在线 - 飓风飞扬 翻译，艾凌风 校稿。未经许可，禁止转载！
+英文出处：Vitor Freitas。欢迎加入翻译组。
+Django内置的用户验证系统十分强大。大多数情况下，它可以拿来就用，能帮我们省去很多开发、测试的工作。它能满足大多数的使用情况并且很安全。但是有时候，为满足我们的网络应用需求，需要对它进行一些微调。
+
+一般来说，我们希望更多地存储与用户有关的数据。如果你的网络应用具有社交属性，你可能希望存储用户简介、地理位置以及其他相关的东西。
+
+在此教程里，我将简单呈现扩展Django用户模型的方法，而你并不需要从头开始去实现每一个细节。
+
+扩展现有用户模型的方法
+
+一般来说，有四种不同的方法可以扩展现有用户模型。下面介绍这四种方法使用的场景。
+
+方法1：使用代理模型
+
+什么是代理模型？
+
+它是一种模型继承，这种模型在数据库中无需创建新表格。它一般被用于改变现有模型的行为方式（例如默认的命令，增加新方法等等），而不影响现有数据库的架构。
+
+什么时候需要用代理模型？
+
+当不需要在数据库中存储额外的信息而仅仅是简单的增加操作方法或更改模型的查询管理方式时，就需要使用代理模型来扩展现有用户模型。
+
+方法2：使用和用户模型一对一的链接(使用Profile扩展User模块)
+
+什么是一对一的链接？
+
+标准的Django模型都会有自己的数据库表，并通过OneToOneField与现有用户模型形成一对一的关联。
+
+什么时候使用一对一链接？
+
+当要存储与现有用户模型相关而又与验证过程无关的额外的信息时，就需要使用一对一链接。我们一般称之为用户配置（User Profile）。
+
+方法3：扩展AbstractBaseUser创建自定义用户模型
+
+什么是基于扩展AbstractBaseUser来创建的自定义用户模型？
+
+它是继承于AbstractBaseUser类的一个全新的用户系统。这需要通过settings.py进行特别的维护和更新一些相关的文件。理想的情况是，它在项目开始时就已经被设计，因为它对数据库架构影响很大。在执行时都需要额外的维护。
+
+什么时候需要扩展AbstractBaseUser类自定义用户模型呢？
+
+当应用对验证过程具有特殊要求时，那么需要自定义一个用户模型。比如，在一些将邮件地址代替用户名作为验证令牌的情况时，自定义用户模型更合适。
+
+方法4：扩展AbstractUser来创建自定义用户模型
+
+什么是基于扩展AbstractUser创建的自定义用户模型？
+
+它是继承于AbstractUser类的一个全新的用户系统。它也需要通过settings.py进行特别的维护和更新一些相关的文件。理想的情况是，它在项目开始之前就已经被设计，因为它对数据库架构影响很大。在执行时需要额外的维护。
+
+什么时候需要扩展AbstractBaseUser类的自定义用户模型呢？
+
+当你对Django处理身份验证过程很满意而又不会改动它时，那可以使用它。或者，你想直接在用户模型中增加一些额外的信息而不想创建新的类时，也可以使用它。（像方法2）
+
+使用代理模式来扩充用户模型
+
+这种方法对现有用户模型影响最小而且不会带来任何新的缺陷。但是它在很多方面实现受到限制。
+
+下面是实现它的方法：
+
+Python
+
+
+from django.contrib.auth.models import User
+from .managers import PersonManager
+
+class Person(User):
+    objects = PersonManager()
+
+    class Meta:
+        proxy = True
+        ordering = ('first_name', )
+
+    def do_something(self):
+        ...
+
+
+
+在上面的例子里，我们定义了一个Person代理模型。通过在内部Meta类中添加“proxy=true”属性，我们告诉Django这是个代理模型。
+
+在这个例子中，我已经定义了默认的命令，为模块分配了自定义Manager，而且定义了新方法do_something。
+
+分别使用User.objects.all()和Person.objects.all()查询相同的数据库表并没有什么意义，因为它们唯一的不同在于我们为代理模型定义的行为方式。
+
+使用一对一链接扩展用户模型（使用Profile）
+
+很有可能就是你所需要的方法。对我个人来说，这是我使用的最多的方法。我们将会创建一个新的Django模块去存储和用户模型相关的额外信息。
+
+记住使用这种方法会额外增加对相关信息的查询和检索。基本上当进入相关数据时，Django就会开启一个额外的查询。但是在大多数情况下，这可以避免。我将会在后面对此进行说明。
+
+一般，我会将Django模块命名为Profile
+
+Python
+
+
+from django.db import models
+from django.contrib.auth.models import User
+
+class Profile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    bio = models.TextField(max_length=500, blank=True)
+    location = models.CharField(max_length=30, blank=True)
+    birth_date = models.DateField(null=True, blank=True)
+这就是这个方法妙处：我们再定义一些信号就能使得：当我们创建和更新用户实例时，Profile模块也会被自动创建和更新。
+
+Python
+
+
+from django.db import models
+from django.contrib.auth.models import User
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+class Profile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    bio = models.TextField(max_length=500, blank=True)
+    location = models.CharField(max_length=30, blank=True)
+    birth_date = models.DateField(null=True, blank=True)
+
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        Profile.objects.create(user=instance)
+
+@receiver(post_save, sender=User)
+def save_user_profile(sender, instance, **kwargs):
+    instance.profile.save()
+基本上无论什么时候保存事件（Save事件）发生，create_user_profile和save_user_profile方法都会被信号连接到用户模型。这种信号被称为post_save.
+
+那如何使用它？
+
+简单！在Django模板中测试下面实例：
+
+XHTML
+
+
+<h2>{{ user.get_full_name }}</h2>
+<ul>
+  <li>Username: {{ user.username }}</li>
+  <li>Location: {{ user.profile.location }}</li>
+  <li>Birth Date: {{ user.profile.birth_date }}</li>
+</ul>
+深入看看实现方法？
+
+Python
+
+
+def update_profile(request, user_id):
+    user = User.objects.get(pk=user_id)
+    user.profile.bio = 'Lorem ipsum dolor sit amet, consectetur adipisicing elit...'
+    user.save()
+通常来说，永远不会触发Profile的save方法。所有的工作都通过用户模型完成。
+
+如果我正在使用Django的表格呢？
+
+你不知道其实可以一次同时进入多个表格么？测试一下下面的程序片段：
+
+forms.py
+
+Python
+
+
+class UserForm(forms.ModelForm):
+    class Meta:
+        model = User
+        fields = ('first_name', 'last_name', 'email')
+
+class ProfileForm(forms.ModelForm):
+    class Meta:
+        model = Profile
+        fields = ('url', 'location', 'company')
+views.py
+
+Python
+
+
+@login_required
+@transaction.atomic
+def update_profile(request):
+    if request.method == 'POST':
+        user_form = UserForm(request.POST, instance=request.user)
+        profile_form = ProfileForm(request.POST, instance=request.user.profile)
+        if user_form.is_valid() and profile_form.is_valid():
+            user_form.save()
+            profile_form.save()
+            messages.success(request, _('Your profile was successfully updated!'))
+            return redirect('settings:profile')
+        else:
+            messages.error(request, _('Please correct the error below.'))
+    else:
+        user_form = UserForm(instance=request.user)
+        profile_form = ProfileForm(instance=request.user.profile)
+    return render(request, 'profiles/profile.html', {
+        'user_form': user_form,
+        'profile_form': profile_form
+    })
+profile.html
+
+XHTML
+
+
+<form method="post">
+  {% csrf_token %}
+  {{ user_form.as_p }}
+  {{ profile_form.as_p }}
+  <button type="submit">Save changes</button>
+</form>
+那增加的数据库查询的问题呢？
+
+我已经在“Optimeze Database Queries(优化数据库查询)”的帖子里已经解释了这个问题。你可以点这了解。
+
+但在这长话短说解释一下：Django关联为浅关联。也就是说当进入一个相关的属性时，Django所做的工作也只是查询数据库而已。有时候这会造成一些意想不到的后果，比如像开启成千上万的查询进程。这个问题可以使用select_related方法缓和一些。
+
+当预知将会进入相关的数据时，可以使用简单的查询先将它取出来。
+
+Python
+
+users = User.objects.all().select_related('profile')
+使用扩展AbstractBaseUser的自定义模块扩展用户模型
+
+这是个比较难理解的方法。实话说，我尽量避免使用这种方法。但是有时候你无法绕过它。并且这种方法可以实现的很完美。几乎没有像这样既可以是最完美也可以是最糟糕的解决方案了。大多数情况下或多或少都有合适的解决方案。但如果这种方案是你问题的最好解决方案，那就使用这种方案吧。
+
+这种方法，我曾经不得不使用过一次。老实说，我不知道这是否是最简洁的实现方法，反正也不管那么多了：
+
+我需要用邮件地址作为身份验证令牌，整个方案里username（用户名）对我来说毫无用处。而且也没有必要使用is_staff标记，因为我没有使用Django Admin。
+
+下面是我自己定义的用户模型：
+
+Python
+
+
+from __future__ import unicode_literals
+
+from django.db import models
+from django.contrib.auth.models import PermissionsMixin
+from django.contrib.auth.base_user import AbstractBaseUser
+from django.utils.translation import ugettext_lazy as _
+
+from .managers import UserManager
+
+
+class User(AbstractBaseUser, PermissionsMixin):
+    email = models.EmailField(_('email address'), unique=True)
+    first_name = models.CharField(_('first name'), max_length=30, blank=True)
+    last_name = models.CharField(_('last name'), max_length=30, blank=True)
+    date_joined = models.DateTimeField(_('date joined'), auto_now_add=True)
+    is_active = models.BooleanField(_('active'), default=True)
+    avatar = models.ImageField(upload_to='avatars/', null=True, blank=True)
+
+    objects = UserManager()
+
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = []
+
+    class Meta:
+        verbose_name = _('user')
+        verbose_name_plural = _('users')
+
+    def get_full_name(self):
+        '''
+        Returns the first_name plus the last_name, with a space in between.
+        '''
+        full_name = '%s %s' % (self.first_name, self.last_name)
+        return full_name.strip()
+
+    def get_short_name(self):
+        '''
+        Returns the short name for the user.
+        '''
+        return self.first_name
+
+    def email_user(self, subject, message, from_email=None, **kwargs):
+        '''
+        Sends an email to this User.
+        '''
+        send_mail(subject, message, from_email, [self.email], **kwargs)
+我希望尽可能保持它与现有用户模型相近。因为模块继承于AbstractBaseUser，我们需要遵循下列规则：
+
+USERNAME_FIELD：描述用户模型字段名的字符串，被用于作为唯一的识别符。字段必须是唯一的（比如，在它的定义里设置 unique=True）；
+
+REQUIRED_FIELDS:字段名称列表，当使用createsuperuser管理命令创建用户时将会提示这些字段名。
+
+is_active:标明用户是否为“active”的布尔类型属性。
+
+get_full_name():正式的长用户标识符。通用的解释是用户的完整命名，但它可以是用来验证用户的任意字符串。
+
+get_short_name():简短非正式的用户识别标识。通用的解释是用户的名（first_name）。
+
+好了，让我们继续。我还必须定义我自己的UserManager。尽管现有的用户管理已经定义了ceate_user和create_superuser方法。
+
+所以，我的UserManager定义如下：
+
+Python
+
+
+from django.contrib.auth.base_user import BaseUserManager
+
+class UserManager(BaseUserManager):
+    use_in_migrations = True
+
+    def _create_user(self, email, password, **extra_fields):
+        """
+        Creates and saves a User with the given email and password.
+        """
+        if not email:
+            raise ValueError('The given email must be set')
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_user(self, email, password=None, **extra_fields):
+        extra_fields.setdefault('is_superuser', False)
+        return self._create_user(email, password, **extra_fields)
+
+    def create_superuser(self, email, password, **extra_fields):
+        extra_fields.setdefault('is_superuser', True)
+
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError('Superuser must have is_superuser=True.')
+
+        return self._create_user(email, password, **extra_fields)
+基本上我已经完成了现有UserManager的系列工作，并删除了username和is_staff属性。
+
+现在最后一步，我们必须上传setting.py。再明确AUTH_USER_MODEL属性。
+
+
+1
+AUTH_USER_MODEL=‘core.User’
+这样我们就告诉了Django使用我们自定义的模块去替代原来默认的模块。在上面的例子中，我已经在名为core的应用内创建了自定义模块。
+
+那么如何引用这个模块呢？
+
+有两种方法。看看Course模块的例子：
+
+Python
+
+
+from django.db import models
+from testapp.core.models import User
+
+class Course(models.Model):
+    slug = models.SlugField(max_length=100)
+    name = models.CharField(max_length=100)
+    tutor = models.ForeignKey(User, on_delete=models.CASCADE)
+这样定义完全可以。但是如果你正在设计一个可重用的应用，并希望它公开可用，那强烈建议使用下面的策略：
+
+Python
+
+
+from django.db import models
+from django.conf import settings
+
+class Course(models.Model):
+    slug = models.SlugField(max_length=100)
+    name = models.CharField(max_length=100)
+    tutor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+通过扩展AbstractUser的自定义模块来扩展用户模型
+
+这种方法相当的直接，因为django.contrib.auth.models.AbstractUser类提供了把默认用户作为抽象模型的整套的实现方案。
+
+Python
+
+
+from django.db import models
+from django.contrib.auth.models import AbstractUser
+
+class User(AbstractUser):
+    bio = models.TextField(max_length=500, blank=True)
+    location = models.CharField(max_length=30, blank=True)
+    birth_date = models.DateField(null=True, blank=True)
+然后必须更新settings.py,定义AUTH_USER_MODEL属性。
+
+
+1
+AUTH_USER_MODEL=‘core.User’
+和前一个方案相似，这种方案的需要在项目开始时就考虑完成并需要额外的维护。它将会改变整个数据库的架构。如果创建外键导入用户模型设置 （from django.conf import settings）而且把引用settings.AUTH_USER_MODEL代替直接引用自定义的用户模型会更好。
+
+结论
+
+好了。我们已阅读了四种扩展现有用户模型的不同方法。我已经尽可能将它们说的详细了。就如我前面所说，没有最好的解决方案。选择什么方案取决于你的需要。保持简单，并作出明智的选择。
+
+Proxy Model：对Django User提供的所有实现都很满意而且不需要存储额外的信息。
+
+User Profile:对Django处理名字认证的方式很满意，而且需要为User增加一些非认证相关的属性。
+
+Custom User Model from AbstractBaseUser：Django处理用户验证的方式不符合你的项目。
+
+Custom User Model from AbstractUser:Django处理用户验证的方式很符合你的项目但是你希望在不创建单独模块的情况下增加一些额外的属性。
+
+不要犹豫去问我问题，告诉我你对这篇文章的看法。
+
+你也可以加入我的邮件列表。
